@@ -2,6 +2,8 @@ node_modules/
 dist/
 output/
 .playwright-cli/
+.vercel/
 .DS_Store
 *.local
+.env*
 현악기_튜너_바이브코딩_프롬프트_설계서.md
