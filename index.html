@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="theme-color" content="#0E1116" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="TuneString" />
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="apple-touch-icon" href="/icon-192.png" />
+    <link rel="icon" href="/icon.svg" type="image/svg+xml" />
+    <title>TuneString</title>
+  </head>
+  <body>
+    <div id="app" class="app" data-state="idle">
+      <header class="top-bar">
+        <div class="brand">
+          <span class="brand-mark" aria-hidden="true"></span>
+          <span>TuneString</span>
+        </div>
+        <div class="top-actions">
+          <span id="wake-status" class="wake-status" aria-live="polite"></span>
+          <button id="settings-button" class="icon-button" type="button" aria-label="설정 열기">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z" />
+              <path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.04.04a2.05 2.05 0 0 1-2.9 2.9l-.04-.04A1.7 1.7 0 0 0 15 19.44a1.7 1.7 0 0 0-1 .16 1.7 1.7 0 0 0-1 1.56V21a2 2 0 0 1-4 0v-.06A1.7 1.7 0 0 0 8 19.38a1.7 1.7 0 0 0-1-.16 1.7 1.7 0 0 0-1.88.34l-.04.04a2.05 2.05 0 0 1-2.9-2.9l.04-.04A1.7 1.7 0 0 0 2.56 15a1.7 1.7 0 0 0-.16-1A1.7 1.7 0 0 0 .84 13H.75a2 2 0 0 1 0-4h.09A1.7 1.7 0 0 0 2.4 8a1.7 1.7 0 0 0-.16-1 1.7 1.7 0 0 0-.34-1.88l-.04-.04a2.05 2.05 0 0 1 2.9-2.9l.04.04A1.7 1.7 0 0 0 7 2.56a1.7 1.7 0 0 0 1-.16A1.7 1.7 0 0 0 9 1V.94a2 2 0 0 1 4 0V1a1.7 1.7 0 0 0 1 1.56 1.7 1.7 0 0 0 1 .16 1.7 1.7 0 0 0 1.88-.34l.04-.04a2.05 2.05 0 0 1 2.9 2.9l-.04.04A1.7 1.7 0 0 0 19.44 7c.08.32.13.65.16 1a1.7 1.7 0 0 0 1.56 1h.09a2 2 0 0 1 0 4h-.09A1.7 1.7 0 0 0 19.6 14c-.03.35-.08.68-.2 1Z" />
+            </svg>
+          </button>
+        </div>
+      </header>
+
+      <nav id="instrument-chips" class="instrument-strip" aria-label="악기 선택"></nav>
+
+      <main class="tuner-main">
+        <section class="readout" aria-label="튜너 표시">
+          <button id="start-button" class="start-button" type="button">튜닝 시작</button>
+          <div id="status-text" class="status-text">대기 중</div>
+          <div id="direction-text" class="direction-text" aria-live="polite">-</div>
+          <div id="note-name" class="note-name" aria-live="polite">A₄</div>
+          <div id="target-text" class="target-text">440.00 Hz</div>
+
+          <div class="gauge-wrap">
+            <svg id="tuner-gauge" class="gauge" viewBox="0 0 320 170" role="img" aria-label="센트 게이지">
+              <path class="gauge-rail" d="M34 138 A126 126 0 0 1 286 138" pathLength="100" />
+              <path id="gauge-active" class="gauge-active" d="M34 138 A126 126 0 0 1 286 138" pathLength="100" />
+              <g class="gauge-ticks" aria-hidden="true">
+                <line x1="34" y1="138" x2="45" y2="131" />
+                <line x1="78" y1="66" x2="86" y2="77" />
+                <line x1="160" y1="12" x2="160" y2="29" class="tick-zero" />
+                <line x1="242" y1="66" x2="234" y2="77" />
+                <line x1="286" y1="138" x2="275" y2="131" />
+              </g>
+              <g id="gauge-needle" class="gauge-needle">
+                <line x1="160" y1="138" x2="160" y2="36" />
+                <circle cx="160" cy="138" r="9" />
+              </g>
+              <text x="34" y="162" class="gauge-label">-50</text>
+              <text x="160" y="162" class="gauge-label gauge-label-center">0</text>
+              <text x="286" y="162" class="gauge-label gauge-label-right">+50</text>
+            </svg>
+          </div>
+
+          <div id="cents-text" class="cents-text">0¢</div>
+          <div id="freq-text" class="freq-text">-- Hz</div>
+        </section>
+
+        <section id="permission-panel" class="permission-panel" hidden>
+          <h2>마이크 접근이 필요합니다</h2>
+          <p id="permission-message">브라우저 설정에서 마이크 권한을 허용한 뒤 다시 시도하세요.</p>
+          <button id="retry-button" class="primary-action" type="button">재시도</button>
+        </section>
+      </main>
+
+      <section id="strings-area" class="strings-area" aria-label="현 선택">
+        <div id="tuning-row" class="tuning-row"></div>
+        <div id="strings-panel" class="strings-panel"></div>
+      </section>
+
+      <div id="complete-banner" class="complete-banner" role="status" aria-live="polite" hidden>
+        튜닝 완료!
+      </div>
+
+      <div id="sheet-backdrop" class="sheet-backdrop" hidden></div>
+      <aside id="settings-sheet" class="settings-sheet" aria-label="설정" aria-hidden="true" hidden>
+        <div class="sheet-handle" aria-hidden="true"></div>
+        <div class="sheet-head">
+          <h2>설정</h2>
+          <button id="close-settings" class="icon-button" type="button" aria-label="설정 닫기">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M6 6l12 12M18 6 6 18" />
+            </svg>
+          </button>
+        </div>
+
+        <div class="setting-row">
+          <label for="a4-input">A4 캘리브레이션</label>
+          <div class="number-control">
+            <input id="a4-input" type="number" min="415" max="466" step="1" inputmode="numeric" />
+            <span>Hz</span>
+            <button id="reset-a4" type="button">440</button>
+          </div>
+        </div>
+
+        <div class="setting-row">
+          <span>마이크 감도</span>
+          <div id="sensitivity-control" class="segmented" role="radiogroup" aria-label="마이크 감도">
+            <button type="button" data-sensitivity="low">낮음</button>
+            <button type="button" data-sensitivity="normal">보통</button>
+            <button type="button" data-sensitivity="high">높음</button>
+          </div>
+        </div>
+
+        <label class="switch-row">
+          <span>확인음</span>
+          <input id="confirm-sound-toggle" type="checkbox" />
+        </label>
+        <label class="switch-row">
+          <span>햅틱</span>
+          <input id="haptic-toggle" type="checkbox" />
+        </label>
+        <label class="switch-row">
+          <span>저음 톤 한 옥타브 위</span>
+          <input id="octave-tone-toggle" type="checkbox" />
+        </label>
+      </aside>
+    </div>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
