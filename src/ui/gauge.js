@@ -25,7 +25,8 @@ export function createGauge({ root }) {
 
     readout.dataset.toneState = toneState;
     active.style.strokeDasharray = `${Math.abs(clampedCents)} 100`;
-    active.style.strokeDashoffset = clampedCents < 0 ? '50' : '0';
+    active.style.strokeDashoffset = String(clampedCents >= 0 ? -50 : Math.abs(clampedCents) - 50);
+    active.style.visibility = clampedCents === 0 ? 'hidden' : 'visible';
 
     if (note) {
       noteName.textContent = note;
@@ -51,6 +52,7 @@ export function createGauge({ root }) {
     targetAngle = 0;
     readout.dataset.toneState = 'idle';
     active.style.strokeDasharray = '0 100';
+    active.style.visibility = 'hidden';
     centsText.textContent = '--¢';
     freqText.textContent = '-- Hz';
     directionText.textContent = '-';

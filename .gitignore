@@ -6,4 +6,8 @@ output/
 .DS_Store
 *.local
 .env*
+TuneString_개선_바이브코딩_프롬프트_설계서_v2(Fable51).md
+test-results/
+playwright-report/
+tests/fixtures/*.wav
 현악기_튜너_바이브코딩_프롬프트_설계서.md

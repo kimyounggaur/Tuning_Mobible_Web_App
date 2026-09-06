@@ -12,8 +12,9 @@ const MAX_FREQ = 1100;
 const CLARITY_MIN = 0.9;
 const PEAK_RATIO = 0.9;
 const ANALYSIS_INTERVAL_MS = 25;
+const EDGE_TOLERANCE_CENTS = 0.05;
 
-export function createPitchEngine({ onResult, onError } = {}) {
+export function createPitchEngine({ onResult } = {}) {
   let audioContext = null;
   let analyser = null;
   let source = null;
@@ -42,14 +43,23 @@ export function createPitchEngine({ onResult, onError } = {}) {
       await audioContext.resume();
       sampleRate = audioContext.sampleRate;
 
-      mediaStream = await navigator.mediaDevices.getUserMedia({
+      if (!globalThis.isSecureContext || !navigator.mediaDevices?.getUserMedia) {
+        throw new Error('SecureContextRequired');
+      }
+      const constraints = {
         audio: {
           echoCancellation: false,
           noiseSuppression: false,
           autoGainControl: false,
           channelCount: 1,
         },
-      });
+      };
+      try {
+        mediaStream = await navigator.mediaDevices.getUserMedia(constraints);
+      } catch (error) {
+        if (error.name !== 'OverconstrainedError') throw error;
+        mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      }
 
       analyser = audioContext.createAnalyser();
       analyser.fftSize = lowRange ? LOW_RANGE_BUFFER_SIZE : BUFFER_SIZE;
@@ -64,7 +74,6 @@ export function createPitchEngine({ onResult, onError } = {}) {
       running = true;
     } catch (error) {
       await stop();
-      onError?.(error);
       throw error;
     }
   }
@@ -181,7 +190,7 @@ export function detectPitch(input, sampleRate, nsdf, rmsMin = RMS_MIN) {
   const tauMin = Math.max(2, Math.floor(sampleRate / MAX_FREQ));
   const tauMax = Math.min(size - 3, Math.ceil(sampleRate / MIN_FREQ));
 
-  for (let tau = tauMin; tau <= tauMax; tau += 1) {
+  for (let tau = 1; tau <= tauMax; tau += 1) {
     let acf = 0;
     let divisor = 0;
     const limit = size - tau;
@@ -196,7 +205,7 @@ export function detectPitch(input, sampleRate, nsdf, rmsMin = RMS_MIN) {
     nsdf[tau] = divisor > 0 ? (2 * acf) / divisor : 0;
   }
 
-  let startTau = tauMin + 1;
+  let startTau = 1;
   while (startTau < tauMax && nsdf[startTau] > 0) {
     startTau += 1;
   }
@@ -205,7 +214,7 @@ export function detectPitch(input, sampleRate, nsdf, rmsMin = RMS_MIN) {
   }
 
   let maxPeak = 0;
-  for (let tau = startTau + 1; tau < tauMax; tau += 1) {
+  for (let tau = Math.max(startTau + 1, tauMin); tau < tauMax; tau += 1) {
     if (isLocalPeak(nsdf, tau) && nsdf[tau] > maxPeak) {
       maxPeak = nsdf[tau];
     }
@@ -218,7 +227,7 @@ export function detectPitch(input, sampleRate, nsdf, rmsMin = RMS_MIN) {
   const peakFloor = maxPeak * PEAK_RATIO;
   let selectedTau = -1;
 
-  for (let tau = startTau + 1; tau < tauMax; tau += 1) {
+  for (let tau = Math.max(startTau + 1, tauMin); tau < tauMax; tau += 1) {
     if (isLocalPeak(nsdf, tau) && nsdf[tau] >= peakFloor) {
       selectedTau = tau;
       break;
@@ -230,7 +239,10 @@ export function detectPitch(input, sampleRate, nsdf, rmsMin = RMS_MIN) {
   }
 
   const { tau, peak } = refinePeak(nsdf, selectedTau);
-  const freq = sampleRate / tau;
+  let freq = sampleRate / tau;
+  // 경계 주파수의 포물선 보간 오차만 흡수한다.
+  if (freq > MAX_FREQ && 1200 * Math.log2(freq / MAX_FREQ) <= EDGE_TOLERANCE_CENTS) freq = MAX_FREQ;
+  if (freq < MIN_FREQ && 1200 * Math.log2(MIN_FREQ / freq) <= EDGE_TOLERANCE_CENTS) freq = MIN_FREQ;
 
   if (peak < CLARITY_MIN || freq < MIN_FREQ || freq > MAX_FREQ) {
     return { silent: false, valid: false, rms, freq, clarity: peak };

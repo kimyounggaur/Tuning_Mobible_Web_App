@@ -4,31 +4,17 @@ import { A4_DEFAULT, INSTRUMENTS, midiToFreq } from './data/presets.js';
 import { createGauge } from './ui/gauge.js';
 import { createStringsPanel, stringKey } from './ui/strings-panel.js';
 import './styles.css';
+import { freqToMidi, midiToNoteName, centsBetween, noteToDisplay, toSubscript, clampIndex } from './core/note.js';
+import { findClosestString as matchString } from './core/string-match.js';
+import { createInTuneTracker } from './core/in-tune.js';
+import { describeMicError } from './app/permission.js';
 
 const STORAGE_KEY = 'tunestring-settings-v1';
 const RECENT_FREQ_SIZE = 5;
 const NOTE_LOCK_COUNT = 3;
 const STRING_LOCK_COUNT = 3;
-const IN_TUNE_CENTS = 5;
-const OUT_OF_TUNE_RELEASE_CENTS = 8;
-const IN_TUNE_HOLD_MS = 500;
 const TONE_RESUME_DELAY_MS = 300;
 const WAKE_STATUS_MS = 3000;
-const NOTE_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
-const SUBSCRIPT_DIGITS = {
-  '-': '₋',
-  0: '₀',
-  1: '₁',
-  2: '₂',
-  3: '₃',
-  4: '₄',
-  5: '₅',
-  6: '₆',
-  7: '₇',
-  8: '₈',
-  9: '₉',
-};
-
 const DEFAULT_SETTINGS = {
   a4: A4_DEFAULT,
   sensitivity: 'normal',
@@ -63,6 +49,7 @@ const els = {
 
 const gauge = createGauge({ root: els.gauge });
 const settings = loadSettings();
+const inTuneTracker = createInTuneTracker();
 const state = {
   started: false,
   selectedInstrumentId: 'guitar',
@@ -116,6 +103,10 @@ const stringsPanel = createStringsPanel({
 
 initialize();
 
+if (import.meta.env.DEV) {
+  window.__gaugeDebug = (cents) => gauge.update({ cents, note: 'A₄', freq: 440, targetFreq: 440 });
+}
+
 function initialize() {
   applySettingsToControls();
   bindEvents();
@@ -123,6 +114,11 @@ function initialize() {
   gauge.setIdle('대기 중');
   syncTargetDisplay();
   registerServiceWorker();
+  navigator.permissions?.query({ name: 'microphone' }).then((permission) => {
+    if (permission.state === 'denied') {
+      document.querySelector('#status-text').textContent = '사이트 설정에서 마이크를 허용하세요';
+    }
+  }).catch(() => {});
 }
 
 function bindEvents() {
@@ -210,10 +206,10 @@ function handlePitchResult(result) {
   const freq = pushMedianFreq(result.freq);
   const instrument = getInstrument();
   const tuning = getTuning(instrument);
-  let targetFreq = 0;
-  let cents = 0;
-  let note = '';
-  let targetKey = '';
+  let targetFreq;
+  let cents;
+  let note;
+  let targetKey;
   let stringChanged = false;
 
   if (instrument.id === 'chromatic') {
@@ -278,38 +274,10 @@ function handlePitchResult(result) {
 }
 
 function updateInTuneState({ cents, targetKey, instrument, tuning }) {
-  const now = performance.now();
-  const abs = Math.abs(cents);
-
-  if (state.inTuneTargetKey !== targetKey) {
-    state.inTune = false;
-    state.inTuneSince = null;
-    state.inTuneTargetKey = targetKey;
-  }
-
-  if (state.inTune) {
-    if (abs > OUT_OF_TUNE_RELEASE_CENTS) {
-      state.inTune = false;
-      state.inTuneSince = null;
-    }
-  } else if (abs <= IN_TUNE_CENTS) {
-    if (state.inTuneSince === null) {
-      state.inTuneSince = now;
-    }
-    if (now - state.inTuneSince >= IN_TUNE_HOLD_MS) {
-      enterInTune({ targetKey, instrument, tuning });
-    }
-  } else {
-    state.inTuneSince = null;
-  }
-
-  if (state.inTune) {
-    return 'in';
-  }
-  if (abs <= 15) {
-    return 'near';
-  }
-  return 'off';
+  const result = inTuneTracker.update(cents, targetKey);
+  state.inTune = result.state === 'in';
+  if (result.entered) enterInTune({ targetKey, instrument, tuning });
+  return result.state;
 }
 
 function enterInTune({ targetKey, instrument, tuning }) {
@@ -455,30 +423,7 @@ function getTuning(instrument = getInstrument()) {
 }
 
 function findClosestString(freq, tuning) {
-  let best = null;
-
-  tuning.strings.forEach((string, index) => {
-    const target = midiToFreq(string.m, settings.a4);
-    const diff = Math.abs(centsBetween(freq, target));
-    if (!best || diff < best.diff) {
-      best = { index, diff };
-    }
-  });
-
-  if (!best) {
-    return null;
-  }
-
-  const bestString = tuning.strings[best.index];
-  const nearestNeighbor = tuning.strings.reduce((nearest, string, index) => {
-    if (index === best.index) {
-      return nearest;
-    }
-    return Math.min(nearest, Math.abs(string.m - bestString.m) * 100);
-  }, Infinity);
-  const threshold = Math.min(200, Number.isFinite(nearestNeighbor) ? nearestNeighbor / 2 : 200);
-
-  return best.diff <= threshold ? best : null;
+  return matchString(freq, tuning, settings.a4);
 }
 
 function updateNoteLock(candidateMidi) {
@@ -539,6 +484,7 @@ function pushMedianFreq(freq) {
 }
 
 function resetTracking({ keepTarget }) {
+  inTuneTracker.reset();
   state.recentFreqs = [];
   state.inTune = false;
   state.inTuneSince = null;
@@ -555,7 +501,6 @@ function resetTracking({ keepTarget }) {
 function resetSessionProgress() {
   state.tunedKeys = new Set();
   state.completeAnnounced = false;
-  state.completeBanner = false;
   state.activeStringIndex = null;
   state.manualStringIndex = 0;
   resetTracking({ keepTarget: false });
@@ -674,12 +619,12 @@ function showWakeStatus(message) {
 
 function showPermissionError(error) {
   els.permissionPanel.hidden = false;
-  const name = error?.name ?? 'UnknownError';
-  const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
-  const browserHint = isIOS
-    ? 'iOS Safari에서는 주소창의 가가 버튼 또는 설정 앱에서 이 사이트의 마이크 권한을 다시 허용하세요.'
-    : 'Android Chrome에서는 주소창 왼쪽 사이트 설정에서 마이크 권한을 허용하세요.';
-  els.permissionMessage.textContent = `${name}: ${browserHint}`;
+  const description = describeMicError(error);
+  document.querySelector('#permission-title').textContent = description.title;
+  els.permissionMessage.textContent = description.body;
+  els.retryButton.hidden = !description.canRetry;
+  document.querySelector('#permission-technical').hidden = !description.technical;
+  document.querySelector('#permission-technical pre').textContent = description.technical;
   gauge.setIdle('마이크 권한 필요');
 }
 
@@ -705,34 +650,8 @@ function saveSettings() {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(settings));
 }
 
-function freqToMidi(freq, a4) {
-  return 69 + 12 * Math.log2(freq / a4);
-}
-
-function centsBetween(freq, targetFreq) {
-  return 1200 * Math.log2(freq / targetFreq);
-}
-
-function midiToNoteName(midi) {
-  const index = ((midi % 12) + 12) % 12;
-  const octave = Math.floor(midi / 12) - 1;
-  return `${NOTE_NAMES[index]}${toSubscript(octave)}`;
-}
-
-function noteToDisplay(note) {
-  return note.replace(/(-?\d+)/, (match) => toSubscript(match));
-}
-
-function toSubscript(value) {
-  return String(value).split('').map((char) => SUBSCRIPT_DIGITS[char] ?? char).join('');
-}
-
-function clampIndex(index, length) {
-  return Math.max(0, Math.min(length - 1, index));
-}
-
 function registerServiceWorker() {
-  if (!('serviceWorker' in navigator) || !import.meta.env.PROD) {
+  if (!('serviceWorker' in navigator) || !import.meta.env.PROD || new URLSearchParams(location.search).has('nosw')) {
     return;
   }
   window.addEventListener('load', () => {
