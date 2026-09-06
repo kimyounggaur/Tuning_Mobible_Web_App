@@ -1,108 +1,79 @@
 import { midiToFreq } from '../data/presets.js';
+import { noteToDisplay } from '../core/note.js';
+import { stringKey } from '../core/string-match.js';
+import { LONG_PRESS_MS } from '../config.js';
+import speakerIcon from 'lucide-static/icons/volume-2.svg?raw';
+import editIcon from 'lucide-static/icons/pencil.svg?raw';
+import { t, getLanguage, tuningName } from '../i18n/index.js';
+export { stringKey } from '../core/string-match.js';
 
-const SPEAKER_ICON = `
-  <svg viewBox="0 0 24 24" aria-hidden="true">
-    <path d="M4 10v4h4l5 4V6l-5 4H4Z" />
-    <path d="M16 9.5a4 4 0 0 1 0 5" />
-    <path d="M18.5 7a7.5 7.5 0 0 1 0 10" />
-  </svg>
-`;
-
-export function createStringsPanel({
-  tuningRow,
-  stringsRoot,
-  onTuningChange,
-  onModeChange,
-  onStringSelect,
-  onToneToggle,
-}) {
-  function render({ instrument, tuning, mode, selectedIndex, tunedKeys, activeIndex, a4, toneKey }) {
-    if (instrument.id === 'chromatic') {
-      tuningRow.hidden = true;
-      stringsRoot.hidden = true;
-      stringsRoot.innerHTML = '';
-      return;
+export function createStringsPanel({ tuningRow, stringsRoot, onTuningChange, onModeChange, onStringSelect, onToneToggle, onCustom }) {
+  let signature = '';
+  let cards = [];
+  let longTimer;
+  let held = false;
+  tuningRow.addEventListener('change', (event) => {
+    if (event.target.id === 'tuning-select') {
+      if (event.target.value === '__custom') onCustom?.();
+      else onTuningChange(event.target.value);
     }
-
-    tuningRow.hidden = false;
-    stringsRoot.hidden = false;
-    renderTuningRow({ instrument, tuning, mode });
-    renderStrings({ tuning, selectedIndex, tunedKeys, activeIndex, a4, toneKey });
-  }
-
-  function renderTuningRow({ instrument, tuning, mode }) {
-    const hasTunings = instrument.tunings.length > 1;
-    tuningRow.innerHTML = `
-      <div class="tuning-select-wrap" ${hasTunings ? '' : 'hidden'}>
-        <select id="tuning-select" aria-label="튜닝 선택">
-          ${instrument.tunings.map((item) => `
-            <option value="${item.id}" ${item.id === tuning.id ? 'selected' : ''}>${item.name}</option>
-          `).join('')}
-        </select>
-      </div>
-      <div class="segmented mode-toggle" role="radiogroup" aria-label="튜닝 모드">
-        <button type="button" data-mode="auto" ${mode === 'auto' ? 'aria-checked="true"' : ''}>자동</button>
-        <button type="button" data-mode="manual" ${mode === 'manual' ? 'aria-checked="true"' : ''}>수동</button>
-      </div>
-    `;
-
-    tuningRow.querySelector('#tuning-select')?.addEventListener('change', (event) => {
-      onTuningChange(event.target.value);
-    });
-
-    tuningRow.querySelectorAll('[data-mode]').forEach((button) => {
-      button.addEventListener('click', () => onModeChange(button.dataset.mode));
-    });
-  }
-
-  function renderStrings({ tuning, selectedIndex, tunedKeys, activeIndex, a4, toneKey }) {
-    stringsRoot.style.setProperty('--string-count', tuning.strings.length);
-    stringsRoot.innerHTML = tuning.strings.map((string, index) => {
-      const key = stringKey(string, index);
-      const isSelected = selectedIndex === index;
-      const isActive = activeIndex === index;
-      const isTuned = tunedKeys.has(key);
-      const isTonePlaying = toneKey === key;
-      const freq = midiToFreq(string.m, a4);
-
-      return `
-        <div class="string-card ${isActive ? 'is-active' : ''} ${isSelected ? 'is-selected' : ''} ${isTuned ? 'is-tuned' : ''}" data-index="${index}">
-          <button class="string-select" type="button" aria-pressed="${isSelected}" aria-label="${string.n} 현 선택">
-            <span class="string-name">${formatNote(string.n)}</span>
-            <span class="string-freq">${freq.toFixed(1)} Hz</span>
-            <span class="string-check" aria-hidden="true">${isTuned ? '✓' : ''}</span>
-          </button>
-          <button class="tone-button ${isTonePlaying ? 'is-playing' : ''}" type="button" aria-label="${string.n} 기준음 재생">
-            ${SPEAKER_ICON}
-          </button>
-        </div>
-      `;
-    }).join('');
-
-    stringsRoot.querySelectorAll('.string-select').forEach((button) => {
-      button.addEventListener('click', () => {
-        const index = Number(button.closest('.string-card').dataset.index);
-        onStringSelect(index);
+  });
+  tuningRow.addEventListener('click', (event) => { const button = event.target.closest('[data-mode]'); if (button) onModeChange(button.dataset.mode); if (event.target.closest('#edit-custom')) onCustom?.(true); });
+  let tuningTimer;
+  tuningRow.addEventListener('pointerdown', (event) => { if (event.target.id === 'edit-custom') tuningTimer = setTimeout(() => onCustom?.(true), LONG_PRESS_MS); });
+  for (const event of ['pointerup', 'pointerleave', 'pointercancel']) tuningRow.addEventListener(event, () => clearTimeout(tuningTimer));
+  stringsRoot.addEventListener('click', (event) => {
+    const button = event.target.closest('button'); if (!button) return;
+    const index = Number(button.closest('[data-index]').dataset.index);
+    if (button.classList.contains('string-select')) onStringSelect(index);
+    else if (!held) onToneToggle(index);
+    held = false;
+  });
+  stringsRoot.addEventListener('pointerdown', (event) => {
+    const button = event.target.closest('.tone-button'); if (!button) return;
+    held = false;
+    longTimer = setTimeout(() => { held = true; onToneToggle(Number(button.closest('[data-index]').dataset.index), true); }, LONG_PRESS_MS);
+  });
+  for (const name of ['pointerup', 'pointercancel', 'pointerleave']) stringsRoot.addEventListener(name, () => clearTimeout(longTimer));
+  function render({ instrument, tuning, mode, selectedIndex, tunedKeys, activeIndex, a4, toneKey }) {
+    tuningRow.hidden = !tuning; stringsRoot.hidden = !tuning;
+    if (!tuning) { signature = ''; return; }
+    const nextSignature = `${getLanguage()}:${instrument.id}:${tuning.id}:${tuning.strings.map((s) => s.m).join(',')}:${instrument.tunings.map((t) => `${t.id}:${t.name}`).join('|')}`;
+    if (signature !== nextSignature) {
+      signature = nextSignature;
+      tuningRow.innerHTML = `<div class="tuning-select-wrap"><select id="tuning-select" aria-label="${t('tuning.select')}"></select></div><div class="segmented mode-toggle" role="radiogroup" aria-label="${t('tuning.mode')}"><button type="button" role="radio" data-mode="auto">${t('auto')}</button><button type="button" role="radio" data-mode="manual">${t('manual')}</button></div>`;
+      const select = tuningRow.querySelector('select');
+      for (const item of instrument.tunings) select.add(new Option(`${item.custom ? '★ ' : ''}${tuningName(item)}`, item.id));
+      select.add(new Option(t('custom'), '__custom'));
+      if (tuning.custom) {
+        const edit = document.createElement('button'); edit.id = 'edit-custom'; edit.type = 'button'; edit.className = 'icon-button'; edit.setAttribute('aria-label', t('custom.edit')); edit.title = t('custom.edit'); edit.innerHTML = editIcon;
+        tuningRow.append(edit);
+      }
+      stringsRoot.replaceChildren();
+      cards = tuning.strings.map((string, index) => {
+        const card = document.createElement('div'); card.className = 'string-card'; card.dataset.index = index;
+        card.innerHTML = `<button class="string-select" type="button"><span class="string-name"></span><span class="string-freq"></span><span class="string-check" aria-hidden="true"></span></button><button class="tone-button" type="button">${speakerIcon}</button>`;
+        const selectButton = card.querySelector('.string-select'); const toneButton = card.querySelector('.tone-button');
+        card.querySelector('.string-name').textContent = noteToDisplay(string.n);
+        toneButton.setAttribute('aria-label', t('string.tone', { note: string.n })); toneButton.title = t('string.tone', { note: string.n });
+        stringsRoot.append(card);
+        return { card, selectButton, toneButton, frequency: card.querySelector('.string-freq'), check: card.querySelector('.string-check') };
       });
-    });
-
-    stringsRoot.querySelectorAll('.tone-button').forEach((button) => {
-      button.addEventListener('click', () => {
-        const index = Number(button.closest('.string-card').dataset.index);
-        onToneToggle(index);
-      });
+      stringsRoot.style.setProperty('--string-count', Math.min(tuning.strings.length, 7));
+      stringsRoot.classList.toggle('is-many', tuning.strings.length > 7);
+      stringsRoot.classList.toggle('has-seven', tuning.strings.length === 7);
+    }
+    tuningRow.querySelector('select').value = tuning.id;
+    tuningRow.querySelectorAll('[data-mode]').forEach((button) => { button.setAttribute('aria-checked', String(button.dataset.mode === mode)); button.tabIndex = button.dataset.mode === mode ? 0 : -1; });
+    cards.forEach(({ card, selectButton, toneButton, frequency, check }, index) => {
+      const string = tuning.strings[index]; const key = stringKey(string, index);
+      const selected = mode === 'manual' && selectedIndex === index;
+      card.classList.toggle('is-active', activeIndex === index); card.classList.toggle('is-selected', selected); card.classList.toggle('is-tuned', tunedKeys.has(key));
+      selectButton.setAttribute('aria-pressed', String(selected)); toneButton.setAttribute('aria-pressed', String(toneKey === key)); toneButton.classList.toggle('is-playing', toneKey === key);
+      const label = `${midiToFreq(string.m, a4).toFixed(1)} Hz`;
+      if (frequency.textContent !== label) frequency.textContent = label;
+      if (check.textContent !== (tunedKeys.has(key) ? '✓' : '')) check.textContent = tunedKeys.has(key) ? '✓' : '';
     });
   }
-
-  return {
-    render,
-  };
-}
-
-export function stringKey(string, index) {
-  return `${index}:${string.n}:${string.m}`;
-}
-
-function formatNote(note) {
-  return note.replace(/(\d)/g, '<span class="octave">$1</span>');
+  return { render };
 }

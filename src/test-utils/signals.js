@@ -25,7 +25,7 @@ export function noise(size = 4096, amp = 0.3) {
 export function pitchCases() {
   const cases = [];
   for (const sr of [48000, 44100]) {
-    for (const freq of [30.87, 41.2, 65.41, 82.41, 110, 220, 440, 659.26, 800, 830, 880, 1000, 1046.5, 1100]) {
+    for (const freq of [25, 30.87, 41.2, 65.41, 82.41, 110, 220, 440, 659.26, 800, 830, 880, 1000, 1046.5, 1100]) {
       cases.push({ label: `sine ${freq} @${sr}`, input: sine(freq, 4096, 0.3, sr), freq, sr });
     }
     for (const freq of [82.41, 110, 196, 440]) {

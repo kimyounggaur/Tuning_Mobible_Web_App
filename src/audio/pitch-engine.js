@@ -1,278 +1,119 @@
-export const BUFFER_SIZE = 4096;
-export const LOW_RANGE_BUFFER_SIZE = 8192;
-export const RMS_MIN = 0.008;
-export const RMS_LEVELS = {
-  low: 0.014,
-  normal: RMS_MIN,
-  high: 0.004,
-};
+import { getAudioContext, unlock } from './context.js';
+import { detectPitch, decimate } from './detect-pitch.js';
+import { BUFFER_SIZE, LOW_RANGE_BUFFER_SIZE, RMS_MIN, MIN_FREQ, MAX_FREQ, ANALYSIS_INTERVAL_MS } from '../config.js';
+export { detectPitch } from './detect-pitch.js';
+export { BUFFER_SIZE, LOW_RANGE_BUFFER_SIZE, RMS_LEVELS } from '../config.js';
 
-const MIN_FREQ = 25;
-const MAX_FREQ = 1100;
-const CLARITY_MIN = 0.9;
-const PEAK_RATIO = 0.9;
-const ANALYSIS_INTERVAL_MS = 25;
-const EDGE_TOLERANCE_CENTS = 0.05;
-
-export function createPitchEngine({ onResult } = {}) {
-  let audioContext = null;
+export function createPitchEngine({ onResult, onState } = {}) {
   let analyser = null;
   let source = null;
   let mediaStream = null;
-  let buffer = null;
+  let timer = null;
+  let worker = null;
+  let workerBroken = false;
+  let buffers = [];
+  let reduced = null;
   let nsdf = null;
-  let timerId = null;
   let sampleRate = 48000;
-  let lowRange = false;
-  let rmsMin = RMS_MIN;
+  let slot = 0;
+  let busy = false;
   let paused = false;
   let running = false;
+  let generation = 0;
+  let latency = 0;
+  let options = { lowRange: false, rmsMin: RMS_MIN, minFreq: MIN_FREQ, maxFreq: MAX_FREQ, decimation: true };
 
-  async function start(options = {}) {
-    if (running) {
-      return;
-    }
-
-    lowRange = Boolean(options.lowRange);
-    rmsMin = options.rmsMin ?? rmsMin;
-    paused = false;
-
+  async function start(next = {}) {
+    if (running) return;
+    const token = ++generation;
+    options = { ...options, ...next };
+    if (!globalThis.isSecureContext || !navigator.mediaDevices?.getUserMedia) throw new Error('SecureContextRequired');
     try {
-      const AudioContextClass = window.AudioContext || window.webkitAudioContext;
-      audioContext = new AudioContextClass();
-      await audioContext.resume();
-      sampleRate = audioContext.sampleRate;
-
-      if (!globalThis.isSecureContext || !navigator.mediaDevices?.getUserMedia) {
-        throw new Error('SecureContextRequired');
-      }
-      const constraints = {
-        audio: {
-          echoCancellation: false,
-          noiseSuppression: false,
-          autoGainControl: false,
-          channelCount: 1,
-        },
-      };
-      try {
-        mediaStream = await navigator.mediaDevices.getUserMedia(constraints);
-      } catch (error) {
-        if (error.name !== 'OverconstrainedError') throw error;
-        mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      }
-
-      analyser = audioContext.createAnalyser();
-      analyser.fftSize = lowRange ? LOW_RANGE_BUFFER_SIZE : BUFFER_SIZE;
-      analyser.smoothingTimeConstant = 0;
-
-      source = audioContext.createMediaStreamSource(mediaStream);
+      const ctx = await unlock(); sampleRate = ctx.sampleRate;
+      if (token !== generation) return;
+      const constraints = { audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false, channelCount: 1 } };
+      let stream;
+      try { stream = await navigator.mediaDevices.getUserMedia(constraints); }
+      catch (error) { if (error.name !== 'OverconstrainedError') throw error; stream = await navigator.mediaDevices.getUserMedia({ audio: true }); }
+      if (token !== generation) { stream.getTracks().forEach((track) => track.stop()); return; }
+      mediaStream = stream;
+      analyser = ctx.createAnalyser(); analyser.smoothingTimeConstant = 0;
+      source = ctx.createMediaStreamSource(stream);
+      // 마이크는 analyser까지만 연결하고 스피커 destination에는 연결하지 않는다.
       source.connect(analyser);
-
-      buffer = new Float32Array(analyser.fftSize);
-      nsdf = new Float32Array(Math.ceil(sampleRate / MIN_FREQ) + 2);
-      timerId = window.setInterval(analyzeFrame, ANALYSIS_INTERVAL_MS);
-      running = true;
-    } catch (error) {
-      await stop();
-      throw error;
-    }
-  }
-
-  async function stop() {
-    if (timerId !== null) {
-      window.clearInterval(timerId);
-      timerId = null;
-    }
-
-    if (source) {
-      source.disconnect();
-      source = null;
-    }
-
-    if (mediaStream) {
-      mediaStream.getTracks().forEach((track) => track.stop());
-      mediaStream = null;
-    }
-
-    if (audioContext) {
-      const closingContext = audioContext;
-      audioContext = null;
-      await closingContext.close().catch(() => {});
-    }
-
-    analyser = null;
-    buffer = null;
-    nsdf = null;
-    running = false;
-    paused = false;
-  }
-
-  async function restart(options = {}) {
-    await stop();
-    await start({
-      lowRange: options.lowRange ?? lowRange,
-      rmsMin: options.rmsMin ?? rmsMin,
-    });
-  }
-
-  function pauseAnalysis() {
-    paused = true;
-  }
-
-  async function resumeAnalysis() {
-    paused = false;
-    if (audioContext?.state === 'suspended') {
-      await audioContext.resume().catch(() => {});
-    }
-  }
-
-  function updateOptions(options = {}) {
-    rmsMin = options.rmsMin ?? rmsMin;
-  }
-
-  function isRunning() {
-    return running;
-  }
-
-  function analyzeFrame() {
-    if (!analyser || !buffer || !nsdf || paused) {
-      return;
-    }
-
-    analyser.getFloatTimeDomainData(buffer);
-    const result = detectPitch(buffer, sampleRate, nsdf, rmsMin);
-    if (result.silent) {
-      onResult?.({ silent: true, rms: result.rms });
-      return;
-    }
-
-    if (result.valid) {
-      if (window.__pitchDebug === true) {
-        console.info(`${result.freq.toFixed(2)} Hz (clarity ${result.clarity.toFixed(2)})`);
+      nsdf = new Float32Array(Math.ceil(sampleRate / MIN_FREQ) + 3);
+      setBufferSize(options.lowRange ? LOW_RANGE_BUFFER_SIZE : BUFFER_SIZE);
+      for (const track of stream.getAudioTracks()) {
+        track.addEventListener('ended', () => { if (mediaStream === stream) { void stop(); onState?.('lost'); } });
+        track.addEventListener('mute', () => { if (mediaStream === stream) onState?.('muted'); });
+        track.addEventListener('unmute', () => { if (mediaStream === stream) onState?.('unmuted'); });
       }
-      onResult?.({
-        freq: result.freq,
-        clarity: result.clarity,
-        rms: result.rms,
-        silent: false,
-      });
-      return;
-    }
-
-    onResult?.({ silent: true, rms: result.rms, rejected: true });
+      paused = false; running = true; startWorker();
+      timer = setInterval(analyzeFrame, ANALYSIS_INTERVAL_MS);
+    } catch (error) { if (token === generation) await stop(); throw error; }
   }
-
-  return {
-    start,
-    stop,
-    restart,
-    pauseAnalysis,
-    resumeAnalysis,
-    updateOptions,
-    isRunning,
-  };
-}
-
-export function detectPitch(input, sampleRate, nsdf, rmsMin = RMS_MIN) {
-  const size = input.length;
-  let squareSum = 0;
-
-  for (let i = 0; i < size; i += 1) {
-    const sample = input[i];
-    squareSum += sample * sample;
+  async function stop() {
+    generation += 1; running = false; paused = false;
+    clearInterval(timer); timer = null;
+    worker?.terminate(); worker = null; busy = false;
+    source?.disconnect(); source = null;
+    const stream = mediaStream; mediaStream = null; stream?.getTracks().forEach((track) => track.stop());
+    analyser?.disconnect(); analyser = null; buffers = []; reduced = null; nsdf = null;
   }
-
-  const rms = Math.sqrt(squareSum / size);
-  if (rms < rmsMin) {
-    return { silent: true, rms };
+  function setBufferSize(size) {
+    if (!analyser || analyser.fftSize === size && buffers[0]?.length === size) return;
+    analyser.fftSize = size;
+    buffers = [new Float32Array(size), new Float32Array(size)]; reduced = new Float32Array(size / 2);
+    generation += 1; busy = false; slot = 0;
   }
-
-  const tauMin = Math.max(2, Math.floor(sampleRate / MAX_FREQ));
-  const tauMax = Math.min(size - 3, Math.ceil(sampleRate / MIN_FREQ));
-
-  for (let tau = 1; tau <= tauMax; tau += 1) {
-    let acf = 0;
-    let divisor = 0;
-    const limit = size - tau;
-
-    for (let i = 0; i < limit; i += 1) {
-      const a = input[i];
-      const b = input[i + tau];
-      acf += a * b;
-      divisor += a * a + b * b;
-    }
-
-    nsdf[tau] = divisor > 0 ? (2 * acf) / divisor : 0;
+  function updateOptions(next = {}) {
+    options = { ...options, ...next };
+    if (analyser) setBufferSize(options.lowRange ? LOW_RANGE_BUFFER_SIZE : BUFFER_SIZE);
+    generation += 1; busy = false;
+    // 진행 중 전송 버퍼가 분리되었으면 옵션 변경 시에만 복구한다.
+    for (let i = 0; i < buffers.length; i += 1) if (!buffers[i].byteLength) buffers[i] = new Float32Array(analyser.fftSize);
   }
-
-  let startTau = 1;
-  while (startTau < tauMax && nsdf[startTau] > 0) {
-    startTau += 1;
+  function startWorker() {
+    if (workerBroken || typeof Worker === 'undefined') { debugMode('main'); return; }
+    try {
+      worker = new Worker(new URL('./pitch-worker.js', import.meta.url), { type: 'module' });
+      worker.onmessage = ({ data }) => {
+        if (data.generation !== generation) return;
+        buffers[data.slot] = data.input; busy = false;
+        latency = latency ? latency * 0.95 + (performance.now() - data.sentAt) * 0.05 : performance.now() - data.sentAt;
+        if (import.meta.env.DEV) globalThis.__pitchLatency = latency;
+        if (running && !paused) deliver(data.result);
+      };
+      worker.onerror = (event) => {
+        event.preventDefault(); workerBroken = true; worker?.terminate(); worker = null; busy = false;
+        if (analyser) buffers = [new Float32Array(analyser.fftSize), new Float32Array(analyser.fftSize)];
+        debugMode('main');
+      };
+      debugMode('worker');
+    } catch { worker = null; workerBroken = true; debugMode('main'); }
   }
-  while (startTau < tauMax && nsdf[startTau] <= 0) {
-    startTau += 1;
-  }
-
-  let maxPeak = 0;
-  for (let tau = Math.max(startTau + 1, tauMin); tau < tauMax; tau += 1) {
-    if (isLocalPeak(nsdf, tau) && nsdf[tau] > maxPeak) {
-      maxPeak = nsdf[tau];
+  function debugMode(mode) { if (import.meta.env.DEV) globalThis.__pitchMode = mode; }
+  function deliver(result) { onResult?.({ ...result, rejected: !result.silent && !result.valid, silent: result.silent || !result.valid }); }
+  function analyzeFrame() {
+    if (!running || paused || busy || !analyser) return;
+    const input = buffers[slot]; if (!input?.byteLength) return;
+    analyser.getFloatTimeDomainData(input);
+    if (worker) {
+      busy = true;
+      worker.postMessage({ input, sampleRate, options, generation, slot, sentAt: performance.now() }, [input.buffer]);
+      slot = 1 - slot;
+    } else {
+      const signal = options.lowRange && options.decimation ? decimate(input, reduced) : input;
+      deliver(detectPitch(signal, signal === input ? sampleRate : sampleRate / 2, nsdf, options));
     }
   }
-
-  if (maxPeak <= 0) {
-    return { silent: false, valid: false, rms };
+  function pauseAnalysis() { paused = true; }
+  async function resumeAnalysis() {
+    if (!running) return false;
+    const ctx = getAudioContext();
+    if (ctx.state !== 'running') await ctx.resume();
+    paused = ctx.state !== 'running';
+    return !paused;
   }
-
-  const peakFloor = maxPeak * PEAK_RATIO;
-  let selectedTau = -1;
-
-  for (let tau = Math.max(startTau + 1, tauMin); tau < tauMax; tau += 1) {
-    if (isLocalPeak(nsdf, tau) && nsdf[tau] >= peakFloor) {
-      selectedTau = tau;
-      break;
-    }
-  }
-
-  if (selectedTau < 0) {
-    return { silent: false, valid: false, rms };
-  }
-
-  const { tau, peak } = refinePeak(nsdf, selectedTau);
-  let freq = sampleRate / tau;
-  // 경계 주파수의 포물선 보간 오차만 흡수한다.
-  if (freq > MAX_FREQ && 1200 * Math.log2(freq / MAX_FREQ) <= EDGE_TOLERANCE_CENTS) freq = MAX_FREQ;
-  if (freq < MIN_FREQ && 1200 * Math.log2(MIN_FREQ / freq) <= EDGE_TOLERANCE_CENTS) freq = MIN_FREQ;
-
-  if (peak < CLARITY_MIN || freq < MIN_FREQ || freq > MAX_FREQ) {
-    return { silent: false, valid: false, rms, freq, clarity: peak };
-  }
-
-  return {
-    silent: false,
-    valid: true,
-    freq,
-    clarity: peak,
-    rms,
-  };
-}
-
-function isLocalPeak(values, index) {
-  return values[index] > values[index - 1] && values[index] >= values[index + 1] && values[index] > 0;
-}
-
-function refinePeak(values, index) {
-  const left = values[index - 1];
-  const center = values[index];
-  const right = values[index + 1];
-  const denominator = left - 2 * center + right;
-
-  if (Math.abs(denominator) < 1e-12) {
-    return { tau: index, peak: center };
-  }
-
-  const shift = 0.5 * (left - right) / denominator;
-  const tau = index + Math.max(-1, Math.min(1, shift));
-  const peak = center - 0.25 * (left - right) * shift;
-  return { tau, peak };
+  return { start, stop, pauseAnalysis, resumeAnalysis, updateOptions, setBufferSize, isRunning: () => running };
 }

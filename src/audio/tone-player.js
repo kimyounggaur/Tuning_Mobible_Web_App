@@ -1,122 +1,68 @@
-const TONE_INTERVAL_SECONDS = 2.5;
-const ATTACK = 0.008;
-const DECAY = 0.12;
-const SUSTAIN = 0.35;
-const RELEASE = 0.25;
-const TONE_HOLD_SECONDS = 1.65;
-const FILTER_FREQ = 2000;
+import { unlock } from './context.js';
+const INTERVAL_SECONDS = 2.5;
+const HOLD_SECONDS = 1.65;
+const RELEASE_SECONDS = 0.25;
+const RAMP_SECONDS = 0.02;
+const DRONE_PEAK_GAIN = 0.25 / 1.75;
 
 export function createTonePlayer({ onPlaybackStart, onPlaybackStop } = {}) {
-  let audioContext = null;
-  let repeatId = null;
+  let repeat = null;
   let activeKey = null;
-  let currentStop = null;
-
-  async function ensureContext() {
-    if (!audioContext) {
-      const AudioContextClass = window.AudioContext || window.webkitAudioContext;
-      audioContext = new AudioContextClass();
+  let generation = 0;
+  const voices = new Set();
+  function voice(ctx, freq, { drone = false, vibrato = false, beep = false } = {}) {
+    const now = ctx.currentTime;
+    const oscillator = ctx.createOscillator(); const gain = ctx.createGain();
+    const filter = ctx.createBiquadFilter();
+    let modulation; let depth; let endAt;
+    oscillator.frequency.setValueAtTime(freq, now);
+    if (drone) oscillator.setPeriodicWave(ctx.createPeriodicWave(new Float32Array(4), Float32Array.of(0, 1, 0.5, 0.25), { disableNormalization: true }));
+    else oscillator.type = beep ? 'sine' : 'triangle';
+    filter.type = 'lowpass'; filter.frequency.value = 2000;
+    gain.gain.setValueAtTime(0, now);
+    gain.gain.linearRampToValueAtTime(drone ? DRONE_PEAK_GAIN : beep ? 0.11 : 0.25, now + (beep ? 0.006 : RAMP_SECONDS));
+    if (!drone) {
+      const hold = beep ? 0.01 : HOLD_SECONDS; const release = beep ? 0.07 : RELEASE_SECONDS;
+      gain.gain.setValueAtTime(beep ? 0.11 : 0.25, now + hold);
+      gain.gain.linearRampToValueAtTime(0, now + hold + release);
+      endAt = now + hold + release + RAMP_SECONDS;
     }
-    if (audioContext.state === 'suspended') {
-      await audioContext.resume();
+    if (drone && vibrato) {
+      modulation = ctx.createOscillator(); depth = ctx.createGain(); modulation.frequency.value = 4; depth.gain.value = 2;
+      modulation.connect(depth).connect(oscillator.detune); modulation.start(now);
     }
-    return audioContext;
+    oscillator.connect(filter).connect(gain).connect(ctx.destination);
+    let stopped = false;
+    const stopVoice = () => {
+      if (stopped) return; stopped = true;
+      const at = ctx.currentTime;
+      if (gain.gain.cancelAndHoldAtTime) gain.gain.cancelAndHoldAtTime(at);
+      else { const value = gain.gain.value; gain.gain.cancelScheduledValues(at); gain.gain.setValueAtTime(value, at); }
+      gain.gain.linearRampToValueAtTime(0, at + RAMP_SECONDS);
+      try { oscillator.stop(at + RAMP_SECONDS); modulation?.stop(at + RAMP_SECONDS); } catch { /* 종료된 노드는 무시 */ }
+    };
+    oscillator.onended = () => { oscillator.disconnect(); filter.disconnect(); gain.disconnect(); modulation?.disconnect(); depth?.disconnect(); voices.delete(stopVoice); };
+    voices.add(stopVoice); oscillator.start(now); if (endAt) oscillator.stop(endAt);
   }
-
-  async function play({ freq, key }) {
-    if (activeKey === key) {
-      stop();
-      return false;
-    }
-
-    stop({ notify: false });
-    const ctx = await ensureContext();
-    activeKey = key;
-    onPlaybackStart?.();
-    scheduleTone(ctx, freq);
-    repeatId = window.setInterval(() => scheduleTone(ctx, freq), TONE_INTERVAL_SECONDS * 1000);
+  function stop({ notify = true } = {}) {
+    generation += 1; clearInterval(repeat); repeat = null;
+    for (const stopVoice of voices) stopVoice();
+    activeKey = null; if (notify) onPlaybackStop?.();
+  }
+  async function play({ freq, key, drone = false, vibrato = false }) {
+    if (activeKey === key) { stop(); return false; }
+    stop({ notify: false }); const token = generation;
+    const context = await unlock();
+    if (token !== generation) return false;
+    activeKey = key; onPlaybackStart?.({ drone, freq });
+    voice(context, freq, { drone, vibrato });
+    if (!drone) repeat = setInterval(() => voice(context, freq), INTERVAL_SECONDS * 1000);
     return true;
   }
-
-  async function unlock() {
-    await ensureContext();
+  async function beep({ enabled = true, freq = 880 } = {}) {
+    if (!enabled) return;
+    const token = generation; const context = await unlock();
+    if (token === generation) voice(context, freq, { beep: true });
   }
-
-  function stop({ notify = true } = {}) {
-    if (repeatId !== null) {
-      window.clearInterval(repeatId);
-      repeatId = null;
-    }
-    currentStop?.();
-    currentStop = null;
-    activeKey = null;
-    if (notify) {
-      onPlaybackStop?.();
-    }
-  }
-
-  async function beep({ enabled = true, freq = 880, duration = 0.08 } = {}) {
-    if (!enabled) {
-      return;
-    }
-
-    const ctx = await ensureContext();
-    const now = ctx.currentTime;
-    const osc = ctx.createOscillator();
-    const gain = ctx.createGain();
-    osc.type = 'sine';
-    osc.frequency.setValueAtTime(freq, now);
-    gain.gain.setValueAtTime(0.0001, now);
-    gain.gain.exponentialRampToValueAtTime(0.11, now + 0.006);
-    gain.gain.exponentialRampToValueAtTime(0.0001, now + duration);
-    osc.connect(gain).connect(ctx.destination);
-    osc.start(now);
-    osc.stop(now + duration + 0.02);
-  }
-
-  function isPlaying() {
-    return activeKey !== null;
-  }
-
-  function scheduleTone(ctx, freq) {
-    const now = ctx.currentTime;
-    const osc = ctx.createOscillator();
-    const filter = ctx.createBiquadFilter();
-    const gain = ctx.createGain();
-
-    osc.type = 'triangle';
-    osc.frequency.setValueAtTime(freq, now);
-    filter.type = 'lowpass';
-    filter.frequency.setValueAtTime(FILTER_FREQ, now);
-
-    gain.gain.cancelScheduledValues(now);
-    gain.gain.setValueAtTime(0.0001, now);
-    gain.gain.exponentialRampToValueAtTime(0.25, now + ATTACK);
-    gain.gain.exponentialRampToValueAtTime(SUSTAIN, now + ATTACK + DECAY);
-    gain.gain.setValueAtTime(SUSTAIN, now + TONE_HOLD_SECONDS);
-    gain.gain.exponentialRampToValueAtTime(0.0001, now + TONE_HOLD_SECONDS + RELEASE);
-
-    osc.connect(filter).connect(gain).connect(ctx.destination);
-    osc.start(now);
-    osc.stop(now + TONE_HOLD_SECONDS + RELEASE + 0.05);
-
-    currentStop = () => {
-      const stopAt = ctx.currentTime + 0.03;
-      try {
-        gain.gain.cancelScheduledValues(ctx.currentTime);
-        gain.gain.setTargetAtTime(0.0001, ctx.currentTime, 0.015);
-        osc.stop(stopAt);
-      } catch {
-        // 이미 종료된 노드는 무시한다.
-      }
-    };
-  }
-
-  return {
-    unlock,
-    play,
-    stop,
-    beep,
-    isPlaying,
-  };
+  return { unlock, play, stop, beep, isPlaying: () => activeKey !== null };
 }

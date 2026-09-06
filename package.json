@@ -1,6 +1,6 @@
 {
   "name": "tunestring",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "private": true,
   "type": "module",
   "scripts": {
@@ -13,7 +13,11 @@
     "test:e2e": "playwright test",
     "test:all": "npm test && npm run gen:wav && npm run build && npm run test:e2e",
     "gen:wav": "node scripts/gen-wav.mjs",
-    "lint": "eslint src scripts tests *.js public/sw.js"
+    "lint": "eslint src scripts tests *.js public/sw.js",
+    "check:i18n": "node scripts/i18n-check.mjs",
+    "check:performance": "node scripts/performance-check.mjs",
+    "audit:lighthouse": "node scripts/lighthouse.mjs",
+    "capture:pwa": "node scripts/capture-pwa.mjs"
   },
   "engines": { "node": ">=22.12.0" },
   "devDependencies": {

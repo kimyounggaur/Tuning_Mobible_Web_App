@@ -1,11 +1,12 @@
 {
   "name": "TuneString",
   "short_name": "TuneString",
-  "description": "현악기를 위한 모바일 PWA 튜너",
+  "id": "/", "lang": "ko", "dir": "ltr", "categories": ["music", "utilities"],
+  "description": "정확한 음정 감지와 기준음 재생, 사용자 정의 조현을 지원하는 오프라인 현악기 튜너",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
-  "orientation": "portrait",
+  "orientation": "any",
   "theme_color": "#0E1116",
   "background_color": "#0E1116",
   "icons": [
@@ -13,13 +14,20 @@
       "src": "/icon-192.png",
       "sizes": "192x192",
       "type": "image/png",
-      "purpose": "any maskable"
+      "purpose": "any"
     },
     {
       "src": "/icon-512.png",
       "sizes": "512x512",
       "type": "image/png",
-      "purpose": "any maskable"
+      "purpose": "any"
+    },
+    {
+      "src": "/icon-maskable.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable"
     }
+  ],
+  "screenshots": [
+    { "src": "/screenshot-narrow.png", "sizes": "1080x1920", "type": "image/png", "form_factor": "narrow", "label": "TuneString 모바일 튜너" },
+    { "src": "/screenshot-wide.png", "sizes": "1920x1080", "type": "image/png", "form_factor": "wide", "label": "TuneString 튜닝 화면" }
   ]
 }

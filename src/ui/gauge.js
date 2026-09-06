@@ -1,116 +1,25 @@
-const MIN_CENTS = -50;
-const MAX_CENTS = 50;
-const MIN_ANGLE = -64;
-const MAX_ANGLE = 64;
-const SMOOTHING = 0.32;
+import { GAUGE_MAX_CENTS, GAUGE_MAX_ANGLE, GAUGE_SMOOTHING_MS, IN_TUNE_CENTS, NEAR_CENTS } from '../config.js';
+import { t } from '../i18n/index.js';
 
 export function createGauge({ root }) {
   const needle = root.querySelector('#gauge-needle');
   const active = root.querySelector('#gauge-active');
-  const noteName = document.querySelector('#note-name');
-  const targetText = document.querySelector('#target-text');
-  const centsText = document.querySelector('#cents-text');
-  const freqText = document.querySelector('#freq-text');
-  const statusText = document.querySelector('#status-text');
-  const directionText = document.querySelector('#direction-text');
-  const readout = document.querySelector('.readout');
   let currentAngle = 0;
   let targetAngle = 0;
-  let frameId = null;
-
-  function update({ cents, note, freq, targetFreq, state, message }) {
-    const clampedCents = clamp(cents ?? 0, MIN_CENTS, MAX_CENTS);
-    targetAngle = mapRange(clampedCents, MIN_CENTS, MAX_CENTS, MIN_ANGLE, MAX_ANGLE);
-    const toneState = state || stateForCents(cents ?? 0);
-
-    readout.dataset.toneState = toneState;
-    active.style.strokeDasharray = `${Math.abs(clampedCents)} 100`;
-    active.style.strokeDashoffset = String(clampedCents >= 0 ? -50 : Math.abs(clampedCents) - 50);
-    active.style.visibility = clampedCents === 0 ? 'hidden' : 'visible';
-
-    if (note) {
-      noteName.textContent = note;
-    }
-    if (Number.isFinite(freq)) {
-      freqText.textContent = `${freq.toFixed(2)} Hz`;
-    }
-    if (Number.isFinite(targetFreq)) {
-      targetText.textContent = `${targetFreq.toFixed(2)} Hz`;
-    }
-    if (Number.isFinite(cents)) {
-      centsText.textContent = `${formatSigned(Math.round(cents))}¢`;
-      directionText.textContent = directionForCents(cents);
-    }
-    if (message) {
-      statusText.textContent = message;
-    }
-
-    ensureAnimation();
+  function update(cents) {
+    const clamped = Math.max(-GAUGE_MAX_CENTS, Math.min(GAUGE_MAX_CENTS, cents ?? 0));
+    targetAngle = clamped / GAUGE_MAX_CENTS * GAUGE_MAX_ANGLE;
+    active.style.strokeDasharray = `${Math.abs(clamped)} 100`;
+    active.style.strokeDashoffset = String(clamped >= 0 ? -50 : Math.abs(clamped) - 50);
+    active.style.visibility = !clamped || cents === null ? 'hidden' : 'visible';
   }
-
-  function setIdle(message = '소리를 들려주세요') {
-    targetAngle = 0;
-    readout.dataset.toneState = 'idle';
-    active.style.strokeDasharray = '0 100';
-    active.style.visibility = 'hidden';
-    centsText.textContent = '--¢';
-    freqText.textContent = '-- Hz';
-    directionText.textContent = '-';
-    statusText.textContent = message;
-    ensureAnimation();
-  }
-
-  function ensureAnimation() {
-    if (frameId === null) {
-      frameId = window.requestAnimationFrame(tick);
-    }
-  }
-
-  function tick() {
-    currentAngle += (targetAngle - currentAngle) * SMOOTHING;
+  function tick(dt) {
+    if (currentAngle === targetAngle) return;
+    currentAngle += (targetAngle - currentAngle) * (1 - Math.exp(-dt / GAUGE_SMOOTHING_MS));
+    if (Math.abs(currentAngle - targetAngle) < 0.05) currentAngle = targetAngle;
     needle.style.transform = `rotate(${currentAngle.toFixed(3)}deg)`;
-
-    if (Math.abs(targetAngle - currentAngle) > 0.05) {
-      frameId = window.requestAnimationFrame(tick);
-    } else {
-      currentAngle = targetAngle;
-      needle.style.transform = `rotate(${currentAngle.toFixed(3)}deg)`;
-      frameId = null;
-    }
   }
-
-  return {
-    update,
-    setIdle,
-  };
+  return { update, tick };
 }
-
-export function stateForCents(cents) {
-  const abs = Math.abs(cents);
-  if (abs <= 5) {
-    return 'in';
-  }
-  if (abs <= 15) {
-    return 'near';
-  }
-  return 'off';
-}
-
-function directionForCents(cents) {
-  if (Math.abs(cents) <= 5) {
-    return '✓';
-  }
-  return cents < 0 ? '▼ 낮음' : '▲ 높음';
-}
-
-function formatSigned(value) {
-  return value > 0 ? `+${value}` : `${value}`;
-}
-
-function mapRange(value, inMin, inMax, outMin, outMax) {
-  return ((value - inMin) * (outMax - outMin)) / (inMax - inMin) + outMin;
-}
-
-function clamp(value, min, max) {
-  return Math.max(min, Math.min(max, value));
-}
+export function stateForCents(cents) { return Math.abs(cents) <= IN_TUNE_CENTS ? 'in' : Math.abs(cents) <= NEAR_CENTS ? 'near' : 'off'; }
+export function directionForCents(cents, state) { return state === 'in' ? '✓' : Math.abs(cents) <= IN_TUNE_CENTS ? '✓' : cents < 0 ? t('direction.low') : t('direction.high'); }

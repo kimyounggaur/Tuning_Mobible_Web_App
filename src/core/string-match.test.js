@@ -6,3 +6,4 @@ it.each(guitar.strings.flatMap((s, index) => [-40, 0, 40].map((cents) => ({ inde
 it('rejects high-G -120 cents', () => expect(findClosestString(midiToFreq(67) * 2 ** (-120 / 1200), INSTRUMENTS[2].tunings[0])).toBeNull());
 it('matches reentrant banjo strings', () => { const t = INSTRUMENTS.find((i) => i.id === 'banjo').tunings[0]; expect(findClosestString(midiToFreq(67), t).index).toBe(0); expect(findClosestString(midiToFreq(62), t).index).toBe(4); });
 it('handles missing tuning', () => expect(findClosestString(440, null)).toBeNull());
+it('allows unison custom strings without collapsing the match tolerance', () => expect(findClosestString(441, { strings: [{ m: 69 }, { m: 69 }] }).index).toBe(0));

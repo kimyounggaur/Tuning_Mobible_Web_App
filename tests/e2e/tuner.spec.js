@@ -1,5 +1,5 @@
-import { test, expect, chromium } from '@playwright/test';
-import path from 'node:path';
+import { test, expect } from '@playwright/test';
+import { fakeBrowser } from './helpers.js';
 
 const cases = [
   { fixture: 'sine-440', instrument: 'chromatic', note: 'A₄', cents: 0, freq: 440 },
@@ -9,9 +9,6 @@ const cases = [
   { fixture: 'sine-659.26', instrument: 'violin', note: 'E₅', cents: 0, freq: 659.26, index: 3 },
   { fixture: 'sine-1000', instrument: 'chromatic', note: 'B₅', cents: 21, freq: 1000 },
 ];
-export async function fakeBrowser(fixture) {
-  return chromium.launch({ args: ['--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream', `--use-file-for-fake-audio-capture=${path.resolve(`tests/fixtures/${fixture}.wav`)}`] });
-}
 for (const scenario of cases) {
   test(`microphone ${scenario.fixture} -> ${scenario.instrument}`, async () => {
     const browser = await fakeBrowser(scenario.fixture);
@@ -28,6 +25,12 @@ for (const scenario of cases) {
         await expect(page.locator('#direction-text')).toHaveText('✓');
       } else {
         await expect(page.locator('#direction-text')).toHaveText('▲ 높음');
+        const pivotError = await page.locator('#tuner-gauge').evaluate((svg) => {
+          const point = new DOMPoint(160, 138); const fixed = point.matrixTransform(svg.getScreenCTM());
+          const rotated = point.matrixTransform(svg.querySelector('#gauge-needle').getScreenCTM());
+          return Math.hypot(fixed.x - rotated.x, fixed.y - rotated.y);
+        });
+        expect(pivotError).toBeLessThan(0.1);
       }
       if (scenario.index !== undefined) await expect(page.locator(`.string-card[data-index="${scenario.index}"]`)).toHaveClass(/is-active/);
     } finally { await browser.close(); }

@@ -1,4 +1,5 @@
-export function createInTuneTracker({ inCents = 5, releaseCents = 8, nearCents = 15, holdMs = 500, now = () => performance.now() } = {}) {
+import { IN_TUNE_CENTS, OUT_OF_TUNE_RELEASE_CENTS, NEAR_CENTS, IN_TUNE_HOLD_MS } from '../config.js';
+export function createInTuneTracker({ inCents = IN_TUNE_CENTS, releaseCents = OUT_OF_TUNE_RELEASE_CENTS, nearCents = NEAR_CENTS, holdMs = IN_TUNE_HOLD_MS, now = () => performance.now() } = {}) {
   let inTune = false;
   let since = null;
   let key = null;

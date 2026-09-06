@@ -11,6 +11,11 @@
     <link rel="apple-touch-icon" href="/icon-192.png" />
     <link rel="icon" href="/icon.svg" type="image/svg+xml" />
     <title>TuneString</title>
+    <meta name="description" content="TuneString은 기타, 베이스, 바이올린과 다양한 현악기를 위한 무료 오프라인 튜너입니다." />
+    <meta property="og:title" content="TuneString" />
+    <meta property="og:description" content="정확한 음정 감지, 기준음과 드론, 사용자 정의 조현을 한 화면에서." />
+    <meta property="og:image" content="https://tuning-mobible-web-app.vercel.app/icon-512.png" />
+    <meta property="og:type" content="website" />
   </head>
   <body>
     <div id="app" class="app" data-state="idle">
@@ -20,8 +25,9 @@
           <span>TuneString</span>
         </div>
         <div class="top-actions">
-          <span id="wake-status" class="wake-status" aria-live="polite"></span>
-          <button id="settings-button" class="icon-button" type="button" aria-label="설정 열기">
+          <span id="calibration-badge" class="calibration-badge" hidden></span>
+          <button id="mic-toggle" class="icon-button" type="button" aria-label="튜닝 시작" data-i18n-aria="start" aria-pressed="false"></button>
+          <button id="settings-button" class="icon-button" type="button" aria-label="설정 열기" data-i18n-aria="settings.open">
             <svg viewBox="0 0 24 24" aria-hidden="true">
               <path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z" />
               <path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.04.04a2.05 2.05 0 0 1-2.9 2.9l-.04-.04A1.7 1.7 0 0 0 15 19.44a1.7 1.7 0 0 0-1 .16 1.7 1.7 0 0 0-1 1.56V21a2 2 0 0 1-4 0v-.06A1.7 1.7 0 0 0 8 19.38a1.7 1.7 0 0 0-1-.16 1.7 1.7 0 0 0-1.88.34l-.04.04a2.05 2.05 0 0 1-2.9-2.9l.04-.04A1.7 1.7 0 0 0 2.56 15a1.7 1.7 0 0 0-.16-1A1.7 1.7 0 0 0 .84 13H.75a2 2 0 0 1 0-4h.09A1.7 1.7 0 0 0 2.4 8a1.7 1.7 0 0 0-.16-1 1.7 1.7 0 0 0-.34-1.88l-.04-.04a2.05 2.05 0 0 1 2.9-2.9l.04.04A1.7 1.7 0 0 0 7 2.56a1.7 1.7 0 0 0 1-.16A1.7 1.7 0 0 0 9 1V.94a2 2 0 0 1 4 0V1a1.7 1.7 0 0 0 1 1.56 1.7 1.7 0 0 0 1 .16 1.7 1.7 0 0 0 1.88-.34l.04-.04a2.05 2.05 0 0 1 2.9 2.9l-.04.04A1.7 1.7 0 0 0 19.44 7c.08.32.13.65.16 1a1.7 1.7 0 0 0 1.56 1h.09a2 2 0 0 1 0 4h-.09A1.7 1.7 0 0 0 19.6 14c-.03.35-.08.68-.2 1Z" />
@@ -30,18 +36,19 @@
         </div>
       </header>
 
-      <nav id="instrument-chips" class="instrument-strip" aria-label="악기 선택"></nav>
+      <nav id="instrument-chips" class="instrument-strip" role="tablist" aria-label="악기 선택" data-i18n-aria="instrument.select"></nav>
 
       <main class="tuner-main">
-        <section class="readout" aria-label="튜너 표시">
-          <button id="start-button" class="start-button" type="button">튜닝 시작</button>
-          <div id="status-text" class="status-text">대기 중</div>
-          <div id="direction-text" class="direction-text" aria-live="polite">-</div>
-          <div id="note-name" class="note-name" aria-live="polite">A₄</div>
+        <section class="readout" aria-label="튜너 표시" data-i18n-aria="tuner.readout">
+          <div id="status-text" class="status-text" data-i18n="status.idle">대기 중</div>
+          <span id="provisional-badge" class="provisional-badge" hidden data-i18n="relative.provisional">임시 데이터 · 연주자 검수 필요</span>
+          <div id="direction-text" class="direction-text">-</div>
+          <div id="note-name" class="note-name">A₄</div>
           <div id="target-text" class="target-text">440.00 Hz</div>
 
           <div class="gauge-wrap">
-            <svg id="tuner-gauge" class="gauge" viewBox="0 0 320 170" role="img" aria-label="센트 게이지">
+            <button id="start-button" class="start-button" type="button" data-i18n="start">튜닝 시작</button>
+            <svg id="tuner-gauge" class="gauge" viewBox="0 0 320 170" role="img" aria-label="센트 게이지" data-i18n-aria="gauge">
               <path class="gauge-rail" d="M34 138 A126 126 0 0 1 286 138" pathLength="100" />
               <path id="gauge-active" class="gauge-active" d="M34 138 A126 126 0 0 1 286 138" pathLength="100" />
               <g class="gauge-ticks" aria-hidden="true">
@@ -63,31 +70,37 @@
 
           <div id="cents-text" class="cents-text">0¢</div>
           <div id="freq-text" class="freq-text">-- Hz</div>
+          <div class="level-meter" role="img" aria-label="마이크 입력 레벨" data-i18n-aria="level"><span id="level-fill"></span><span id="level-threshold"></span></div>
+          <canvas id="pitch-trace" class="pitch-trace" width="320" height="56" role="img" aria-label="최근 3초 음정 궤적" data-i18n-aria="trace.label" hidden></canvas>
+          <span id="clipping-badge" class="clipping-badge" hidden data-i18n="clipping">입력이 너무 큽니다</span>
         </section>
 
         <section id="permission-panel" class="permission-panel" hidden>
           <h2 id="permission-title">마이크 접근이 필요합니다</h2>
           <p id="permission-message">브라우저 설정에서 마이크 권한을 허용한 뒤 다시 시도하세요.</p>
-          <details id="permission-technical" hidden><summary>오류 세부 정보</summary><pre></pre></details>
-          <button id="retry-button" class="primary-action" type="button">재시도</button>
+          <details id="permission-technical" hidden><summary data-i18n="mic.details">오류 세부 정보</summary><pre></pre></details>
+          <button id="retry-button" class="primary-action" type="button" data-i18n="retry">재시도</button>
         </section>
       </main>
 
-      <section id="strings-area" class="strings-area" aria-label="현 선택">
+      <section id="strings-area" class="strings-area" aria-label="현 선택" data-i18n-aria="strings.select">
         <div id="tuning-row" class="tuning-row"></div>
         <div id="strings-panel" class="strings-panel"></div>
       </section>
 
       <div id="complete-banner" class="complete-banner" role="status" aria-live="polite" hidden>
-        튜닝 완료!
+        <span data-i18n="complete">튜닝 완료!</span><button id="reset-session" class="primary-action" type="button" data-i18n="reset">처음부터</button>
       </div>
-
+      <p id="sr-status" class="sr-only" role="status" aria-live="polite" aria-atomic="true"></p>
+      <div id="toast" class="toast" role="status" hidden></div>
+      <div id="update-toast" class="toast update-toast" role="status" hidden><span data-i18n="update.available">새 버전이 있습니다</span><button id="apply-update" class="primary-action" type="button" data-i18n="update.apply">업데이트</button></div>
+    </div>
       <div id="sheet-backdrop" class="sheet-backdrop" hidden></div>
-      <aside id="settings-sheet" class="settings-sheet" aria-label="설정" aria-hidden="true" hidden>
+      <aside id="settings-sheet" class="settings-sheet" role="dialog" aria-modal="true" aria-labelledby="settings-title" aria-hidden="true" hidden>
         <div class="sheet-handle" aria-hidden="true"></div>
         <div class="sheet-head">
-          <h2>설정</h2>
-          <button id="close-settings" class="icon-button" type="button" aria-label="설정 닫기">
+          <h2 id="settings-title" tabindex="-1" data-i18n="settings">설정</h2>
+          <button id="close-settings" class="icon-button" type="button" aria-label="설정 닫기" data-i18n-aria="settings.close">
             <svg viewBox="0 0 24 24" aria-hidden="true">
               <path d="M6 6l12 12M18 6 6 18" />
             </svg>
@@ -95,37 +108,56 @@
         </div>
 
         <div class="setting-row">
-          <label for="a4-input">A4 캘리브레이션</label>
+          <label for="a4-input" data-i18n="a4">A4 캘리브레이션</label>
           <div class="number-control">
+            <button id="a4-minus" type="button" aria-label="A4 1Hz 낮추기" data-i18n-aria="a4.lower">−</button>
             <input id="a4-input" type="number" min="415" max="466" step="1" inputmode="numeric" />
+            <button id="a4-plus" type="button" aria-label="A4 1Hz 높이기" data-i18n-aria="a4.raise">+</button>
             <span>Hz</span>
             <button id="reset-a4" type="button">440</button>
           </div>
         </div>
 
         <div class="setting-row">
-          <span>마이크 감도</span>
-          <div id="sensitivity-control" class="segmented" role="radiogroup" aria-label="마이크 감도">
-            <button type="button" data-sensitivity="low">낮음</button>
-            <button type="button" data-sensitivity="normal">보통</button>
-            <button type="button" data-sensitivity="high">높음</button>
+          <span data-i18n="sensitivity">마이크 감도</span>
+          <div id="sensitivity-control" class="segmented" role="radiogroup" aria-label="마이크 감도" data-i18n-aria="sensitivity">
+            <button type="button" role="radio" data-sensitivity="low" data-i18n="sensitivity.low">낮음</button>
+            <button type="button" role="radio" data-sensitivity="normal" data-i18n="sensitivity.normal">보통</button>
+            <button type="button" role="radio" data-sensitivity="high" data-i18n="sensitivity.high">높음</button>
           </div>
         </div>
 
         <label class="switch-row">
-          <span>확인음</span>
+          <span data-i18n="confirmSound">확인음</span>
           <input id="confirm-sound-toggle" type="checkbox" />
         </label>
         <label class="switch-row">
-          <span>햅틱</span>
+          <span data-i18n="haptics">햅틱</span>
           <input id="haptic-toggle" type="checkbox" />
         </label>
         <label class="switch-row">
-          <span>저음 톤 한 옥타브 위</span>
+          <span data-i18n="octaveToneUp">저음 톤 한 옥타브 위</span>
           <input id="octave-tone-toggle" type="checkbox" />
         </label>
+        <label class="switch-row"><span data-i18n="recentOrder">최근 사용 악기 순서</span><input id="recent-order-toggle" type="checkbox" /></label>
+        <div class="setting-row"><label for="language-select" data-i18n="language">언어</label><select id="language-select"><option value="auto" data-i18n="auto">자동</option><option value="ko">한국어</option><option value="en">English</option><option value="ja">日本語</option></select></div>
+        <div class="setting-row"><label for="theme-select" data-i18n="theme">테마</label><select id="theme-select"><option value="system" data-i18n="system">시스템</option><option value="dark" data-i18n="dark">다크</option><option value="light" data-i18n="light">라이트</option></select></div>
+        <label class="switch-row"><span data-i18n="trace">피치 트레이스 표시</span><input id="trace-toggle" type="checkbox" /></label>
+        <label class="switch-row"><span data-i18n="droneVibrato">드론 비브라토</span><input id="drone-vibrato-toggle" type="checkbox" /></label>
+        <label class="switch-row"><span data-i18n="droneListen">드론과 함께 듣기 (실험)</span><input id="drone-listen-toggle" type="checkbox" /></label>
+        <p class="setting-note" data-i18n="drone.warning">드론과 함께 듣기는 스피커 소리가 마이크에 들어오면 정확하지 않을 수 있습니다.</p>
+        <div id="reference-setting" hidden><div class="setting-row"><label for="reference-note" data-i18n="relative.reference">기준음 (청)</label><select id="reference-note"></select></div><p id="tuning-source" class="setting-note"></p></div>
+        <div class="app-info"><span id="app-version"></span><span id="build-info"></span><span id="sw-status"></span><button id="clear-cache" type="button" data-i18n="cache.clear">캐시 지우고 새로고침</button></div>
       </aside>
-    </div>
+    <aside id="custom-sheet" class="settings-sheet" role="dialog" aria-modal="true" aria-labelledby="custom-title" hidden>
+      <div class="sheet-handle" aria-hidden="true"></div>
+      <div class="sheet-head"><h2 id="custom-title" tabindex="-1" data-i18n="custom.title">사용자 정의 튜닝</h2><button id="close-custom" type="button" class="icon-button" aria-label="닫기" data-i18n-aria="close">×</button></div>
+      <form id="custom-form">
+        <label for="custom-name" data-i18n="custom.name">튜닝 이름</label><input id="custom-name" type="text" maxlength="40" required autocomplete="off" />
+        <div id="custom-strings"></div><p id="custom-error" role="alert" hidden></p>
+        <div class="custom-actions"><button id="delete-custom" type="button" class="icon-button" aria-label="사용자 정의 튜닝 삭제" data-i18n-aria="custom.delete" title="사용자 정의 튜닝 삭제" data-i18n-title="custom.delete" hidden></button><button type="submit" class="primary-action" data-i18n="save">저장</button></div>
+      </form>
+    </aside>
     <script type="module" src="/src/main.js"></script>
   </body>
 </html>
