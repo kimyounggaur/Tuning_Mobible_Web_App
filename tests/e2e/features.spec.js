@@ -84,8 +84,9 @@ test('trace draws +20 cents and long press starts a paused drone', async () => {
     })).toBeGreaterThan(20);
     await page.screenshot({ path: 'output/screens/trace-20cents.png' });
     await page.locator('[data-instrument="guitar"]').click();
-    const button = page.locator('.tone-button').first(); await button.dispatchEvent('pointerdown', { button: 0 }); await page.waitForTimeout(550); await button.dispatchEvent('pointerup');
+    const button = page.locator('.tone-button').first(); await button.click({ delay: 550 });
     await expect(page.locator('#status-text')).toContainText('드론 재생 중'); await expect(page.locator('#freq-text')).toHaveText('-- Hz');
-    await button.click(); await button.click(); await expect(button).toHaveAttribute('aria-pressed', 'false');
+    await expect(button).toHaveAttribute('aria-pressed', 'true');
+    await button.click(); await expect(button).toHaveAttribute('aria-pressed', 'false');
   } finally { await browser.close(); }
 });
